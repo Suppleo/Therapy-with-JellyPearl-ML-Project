@@ -14,7 +14,7 @@ supabase_key = os.getenv("SUPABASE_KEY")
 supabase = create_client(supabase_url, supabase_key)
 
 # Load PhoBERT
-model_path = './phobert_best'
+model_path = 'Suppleo/phobert-finetuned-jellypearl'
 try:
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
