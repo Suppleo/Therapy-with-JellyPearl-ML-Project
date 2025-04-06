@@ -3,9 +3,15 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 from openai import OpenAI
 import os
-import sqlite3
 from dotenv import load_dotenv
+from supabase import create_client
+
 load_dotenv()
+
+# Initialize Supabase client
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_KEY")
+supabase = create_client(supabase_url, supabase_key)
 
 # Load PhoBERT
 model_path = './phobert_best'
@@ -33,6 +39,9 @@ emotion_map_display = {
     "Enjoyment": "Vui vẻ", "Sadness": "Buồn bã", "Fear": "Sợ hãi", "Anger": "Tức giận",
     "Disgust": "Ghê tởm", "Surprise": "Ngạc nhiên", "Other": "Bình thường"
 }
+
+# Reverse mapping for saving corrected emotion in English
+display_to_english = {v: k for k, v in emotion_map_display.items()}
 
 def predict_generate_and_get_meme(input_text):
     inputs = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True, max_length=128)
@@ -66,31 +75,30 @@ def predict_generate_and_get_meme(input_text):
         response_text = "JellyPearl tạm thời mất kết nối vũ trụ, thử lại nhé!"
 
     try:
-        conn = sqlite3.connect('./emotion_memes.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT meme_path FROM memes WHERE emotion = ? ORDER BY RANDOM() LIMIT 1", (emotion_internal,))
-        result = cursor.fetchone()
-        meme_path = result[0] if result else None
-        conn.close()
-    except sqlite3.Error as e:
-        st.error(f"Lỗi khi truy cập cơ sở dữ liệu meme: {e}")
-        meme_path = None
+        response = supabase.table("memes").select("meme_url").eq("emotion", emotion_internal).execute()
+        memes = response.data
+        meme_url = memes[0]['meme_url'] if memes else None
+    except Exception as e:
+        st.error(f"Lỗi khi lấy meme từ Supabase: {e}")
+        meme_url = None
 
-    return emotion_display, response_text, meme_path
+    return emotion_display, response_text, meme_url
 
 def store_feedback(input_text, predicted_emotion, rating, corrected_emotion=None):
     try:
-        conn = sqlite3.connect('./emotion_memes.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO feedback (input_text, predicted_emotion, rating, corrected_emotion)
-            VALUES (?, ?, ?, ?)
-        ''', (input_text, predicted_emotion, rating, corrected_emotion))
-        conn.commit()
-        conn.close()
+        corrected_eng = None
+        if corrected_emotion:
+            corrected_eng = display_to_english.get(corrected_emotion, corrected_emotion)
+        data = {
+            "input_text": input_text,
+            "predicted_emotion": predicted_emotion,
+            "rating": rating,
+            "corrected_emotion": corrected_eng
+        }
+        supabase.table("feedback").insert(data).execute()
         return True
-    except sqlite3.Error as e:
-        st.error(f"Lỗi khi lưu phản hồi: {e}")
+    except Exception as e:
+        st.error(f"Lỗi khi lưu phản hồi lên Supabase: {e}")
         return False
 
 # --- Session State ---
@@ -114,8 +122,8 @@ user_input = st.text_input("Suy nghĩ của bạn:", "Tôi cảm thấy lạc l�
 if st.button("Nhận lời khuyên"):
     if user_input.strip():
         with st.spinner("JellyPearl đang phân tích tâm hồn bạn..."):
-            emotion, response, meme_path = predict_generate_and_get_meme(user_input)
-            st.session_state.result = (emotion, response, meme_path)
+            emotion, response, meme_url = predict_generate_and_get_meme(user_input)
+            st.session_state.result = (emotion, response, meme_url)
             st.session_state.feedback_submitted = False
             st.session_state.feedback_type = None
             st.session_state.show_dislike_form = False
@@ -125,19 +133,19 @@ if st.button("Nhận lời khuyên"):
 
 # --- Show result ---
 if st.session_state.result:
-    emotion, response, meme_path = st.session_state.result
+    emotion, response, meme_url = st.session_state.result
     st.subheader("Kết quả:")
     st.write(f"**Cảm xúc của bạn:** {emotion}")
     st.write(f"**Lời khuyên từ JellyPearl:** {response}")
-    if meme_path:
-        st.image(meme_path, caption=f"Meme dành cho bạn hôm nay (Cảm xúc {emotion})", use_container_width=True)
+    if meme_url:
+        st.image(meme_url, caption=f"Meme dành cho bạn hôm nay (Cảm xúc {emotion})", use_container_width=True)
     else:
         st.write("Không có meme nào phù hợp.")
 
     # --- Feedback Buttons ---
     st.subheader("Đánh giá của bạn")
     if not st.session_state.feedback_submitted:
-        col1, col2 = st.columns([1, 1])  # Adjusted spacing
+        col1, col2 = st.columns([1, 1])
         with col1:
             if st.button("Thích", key="like_btn"):
                 if store_feedback(user_input, emotion, "like"):
