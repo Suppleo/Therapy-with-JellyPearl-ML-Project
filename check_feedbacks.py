@@ -17,7 +17,7 @@ def main():
 
     # Check if count is a multiple of 100
     # if count > 0 and count % 100 == 0:
-    if count > 0 and count % 5 == 0:
+    if count > 0:
         print("Threshold reached. Starting retraining...")
         # Call retrain.py
         subprocess.run(["python", "retrain.py"], check=True)
