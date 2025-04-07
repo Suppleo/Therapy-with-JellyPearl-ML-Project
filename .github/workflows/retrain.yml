@@ -1,0 +1,43 @@
+name: Automated PhoBERT Retraining
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Runs daily at midnight UTC
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true # Enable Git LFS support
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install datasets supabase huggingface_hub
+
+      - name: Set environment variables
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> $GITHUB_ENV
+          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> $GITHUB_ENV
+
+      - name: Check feedback count and retrain if needed
+        run: python check_feedbacks.py
+
+      - name: Commit and push updated model
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add phobert_best/
+          git commit -m "Auto-retrained PhoBERT model" || echo "No changes to commit"
+          git push
