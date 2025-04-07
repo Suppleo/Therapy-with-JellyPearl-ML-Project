@@ -20,6 +20,10 @@ jobs:
         with:
           python-version: "3.9"
 
+      - name: Uninstall conflicting packages
+        run: |
+          pip uninstall -y transformers accelerate huggingface_hub || true
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
